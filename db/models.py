@@ -49,7 +49,7 @@ class ProfileModel(Base):
 
 class CategoryModel(Base):
     __tablename__ = "categories"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False)
     image_url: Mapped[str] = mapped_column(Text, nullable=True)
@@ -60,7 +60,7 @@ class CategoryModel(Base):
 class ImageWordModel(Base):
     __tablename__ = "image_words"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
+    category_id: Mapped[int] = mapped_column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
     word = Column(String, nullable=False)
     image_url = Column(Text, nullable=True)
     

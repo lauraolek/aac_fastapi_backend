@@ -1,4 +1,5 @@
-from typing import Optional, List
+import asyncio
+from typing import Optional, List, Tuple
 from fastapi import UploadFile, HTTPException, status
 import logging
 from uuid import UUID as PyUUID
@@ -41,6 +42,61 @@ class CategoryService:
         categories = await self.repo.find_by_profile(user_id, profile_id)
         return [Category.model_validate(cat) for cat in categories]
 
+    async def create_categories_batch(
+        self, 
+        user_id: PyUUID, 
+        profile_id: int, 
+        items: List[Tuple[str, UploadFile]]
+    ) -> List[Category]:
+        """
+        Handles batch image upload and database persistence for multiple categories.
+        """
+        uploaded_urls = []
+        category_data_list = []
+        
+        try:
+            # 1. Concurrent Image Uploads
+            # We process uploads in parallel to speed up the batch process
+            async def upload_and_track(name: str, file: UploadFile):
+                url = await self.storage_service.upload(file)
+                return name, url
+
+            upload_tasks = [upload_and_track(name, file) for name, file in items]
+            results = await asyncio.gather(*upload_tasks)
+
+            # 2. Prepare Database Models
+            for name, image_url in results:
+                uploaded_urls.append(image_url)
+                category_data_list.append(
+                    CategoryCreate(
+                        name=name,
+                        image_url=image_url,
+                        profile_id=profile_id
+                    )
+                )
+
+            # 3. Bulk Database Persistence            
+            created_records = await self.repo.save_many(user_id, category_data_list)
+            await self.repo.session.commit()
+            
+            return [Category.model_validate(rec) for rec in created_records]
+
+        except Exception as e:
+            # 4. Cleanup: Delete any successfully uploaded images if the DB fails
+            cleanup_tasks = [self.storage_service.delete(url) for url in uploaded_urls]
+            if cleanup_tasks:
+                await asyncio.gather(*cleanup_tasks)
+            
+            await self.repo.session.rollback()
+            logger.error(f"Failed to create categories batch: {e}")
+            
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create categories in batch."
+            )
+
     async def create_category(
         self, 
         user_id: PyUUID, 
@@ -51,33 +107,8 @@ class CategoryService:
         """
         Handles image upload and database persistence for a new category.
         """
-        image_url = None
-        try:
-            image_url = await self.storage_service.upload(image_file)
-            
-            category_create = CategoryCreate(
-                name=name,
-                image_url=image_url,
-                profile_id=profile_id
-            )
-
-            created_category = await self.repo.save(user_id, category_create)
-            await self.repo.session.commit()
-            
-            return Category.model_validate(created_category)
-            
-        except Exception as e:
-            if image_url:
-                await self.storage_service.delete(image_url)
-            
-            await self.repo.session.rollback()
-            logger.error(f"Failed to create category: {e}")
-            if isinstance(e, HTTPException):
-                raise e
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create category."
-            )
+        results = await self.create_categories_batch(user_id, profile_id, [(name, image_file)])
+        return results[0]
 
     async def update_category(
         self, 
@@ -162,9 +193,8 @@ class CategoryService:
             )
 
         # Trigger storage cleanup in background or after-the-fact
-        for url in urls_to_delete:
-            try:
-                await self.storage_service.delete(url)
-            except Exception as e:
-                # TODO In a pro system, you'd log this for a background cleanup task.
-                logger.warning(f"Orphaned image left at {url}: {e}")
+        try:
+            await self.storage_service.delete_batch(urls_to_delete)
+        except Exception as e:
+            # TODO In a pro system, you'd log this for a background cleanup task.
+            logger.warning(f"Orphaned image left: {e}")

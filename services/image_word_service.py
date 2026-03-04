@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from fastapi import Depends, UploadFile, HTTPException, status
 from sqlalchemy.exc import NoResultFound
 from uuid import UUID as PyUUID
@@ -50,7 +51,58 @@ class ImageWordService:
             )
         
         return ImageWord.model_validate(word_data)
+    
+    async def save_batch(
+        self, 
+        user_id: PyUUID, 
+        items: List[Tuple[int, str, UploadFile]]
+    ) -> List[ImageWord]:
+        """
+        Processes multiple images in parallel and commits them in a single DB transaction.
+        'items' is a list of (category_id, word_text, image_file)
+        """
+        uploaded_urls = []
+        
+        try:
+            # 1. Parallel Uploads to Cloudflare
+            upload_tasks = [self.storage_service.upload(item[2]) for item in items]
+            uploaded_urls = await asyncio.gather(*upload_tasks)
 
+            # 2. Prepare Database Objects
+            word_data_list = []
+            for i, (category_id, word_text, _) in enumerate(items):
+                word_data_list.append(
+                    ImageWordCreate(
+                        category_id=category_id,
+                        word=word_text,
+                        image_url=uploaded_urls[i]
+                    )
+                )
+            
+            # 3. Batch DB Save
+            saved_records = await self.repo.save_many(user_id, word_data_list)
+
+            await self.repo.session.commit()
+            
+            return [ImageWord.model_validate(r) for r in saved_records]
+
+        except Exception as e:
+            # Cleanup: Delete ALL successfully uploaded images from Cloudflare on any failure
+            if uploaded_urls:
+                cleanup_tasks = [self.storage_service.delete(url) for url in uploaded_urls if url]
+                await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+            
+            await self.repo.session.rollback()
+            logger.error(f"Batch seeding failed: {e}")
+            
+            if isinstance(e, NoResultFound):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail="Failed to seed user images."
+            )
+        
     async def save(
         self, 
         user_id: PyUUID, 
@@ -58,40 +110,8 @@ class ImageWordService:
         word_text: str, 
         image_file: UploadFile
     ) -> ImageWord:
-        """
-        Creates a new ImageWord, handling image upload and DB rollback on failure.
-        """
-        image_url = None
-        try:
-            image_url = await self.storage_service.upload(image_file)
-            
-            word_data = ImageWordCreate(
-                category_id=category_id,
-                word=word_text,
-                image_url=image_url
-            )
-            
-            saved_data = await self.repo.save(user_id, word_data)
-            await self.repo.session.commit()
-            return ImageWord.model_validate(saved_data)
-
-        except NoResultFound as e:
-            # Category not found or ownership violation
-            if image_url:
-                await self.storage_service.delete(image_url)
-            await self.repo.session.rollback()
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-            
-        except Exception as e:
-            # Generic failure: Cleanup uploaded file and rollback
-            if image_url:
-                await self.storage_service.delete(image_url)
-            await self.repo.session.rollback()
-            logger.error(f"Error saving image word: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-                detail="Failed to save image word."
-            )
+        results = await self.save_batch(user_id, [(category_id, word_text, image_file)])
+        return results[0]
 
     async def update(
         self, 

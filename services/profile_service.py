@@ -1,8 +1,8 @@
 import asyncio
 import logging
-from typing import List, Optional, cast
+from typing import List, Optional, Set, Tuple, cast
 from uuid import UUID as PyUUID
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, UploadFile, status
 from sqlalchemy.exc import NoResultFound
 
 from db.category_repository import CategoryRepository
@@ -10,7 +10,7 @@ from db.image_word_repository import ImageWordRepository
 from db.profile_repository import ProfileRepository
 from services.seeding_service import SeedingService
 from services.image_storage_service import ImageStorageService, get_storage_service
-from models.schemas import Profile, ProfileCreate 
+from models.schemas import CategoryCreate, ImageWordCreate, Profile, ProfileCreate 
 
 logger = logging.getLogger(__name__)
 
@@ -92,18 +92,18 @@ class ProfileService:
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
             
-        urls_to_delete: List[str] = []
+        urls_to_delete: Set[str] = set()
         
         # Collect all asset URLs from categories and their words
         if profile.categories:
             for category in profile.categories:
                 if category.image_url:
-                    urls_to_delete.append(category.image_url)
+                    urls_to_delete.add(category.image_url)
                 
                 items = getattr(category, 'items', [])
                 for item in items:
                     if item.image_url:
-                        urls_to_delete.append(item.image_url)
+                        urls_to_delete.add(item.image_url)
 
         try:
             # Database deletion (cascading delete should handle child rows in DB)
@@ -116,13 +116,11 @@ class ProfileService:
 
         # Storage cleanup (Post-Commit)
         if urls_to_delete:
-            for url in urls_to_delete:
-                try:
-                    await self.image_storage_service.delete(url)
-                except Exception as e:
-                    # TODO In a pro system, you'd log this for a background cleanup task.
-                    logger.warning(f"Orphaned asset cleanup failed for {url}: {e}")
-
+            try:
+                await self.image_storage_service.delete_batch(list(urls_to_delete))
+            except Exception as e:
+                # TODO In a pro system, you'd log this for a background cleanup task.
+                logger.warning(f"Orphaned image left: {e}")
     async def seed_categories_and_image_words(self, user_id: PyUUID, profile_id: int):
         """
         Internal helper to populate a new profile with defaults.
@@ -136,39 +134,111 @@ class ProfileService:
         # Structure: (Category Name, Asset Filename)
         categories_to_seed = [
             ("Algused", "beginning.png"),
-            ("Tegevused", "activity.png")
+            ("Numbrid", "numbers.png"),
+            ("Värvid", "colors.png"),
+            ("Omadused", "adjectives.png"),
+            ("Köök", "kitchen.png"),
+            ("Mänguasjad", "toys.png"),
+            ("Tegevused", "activity.png"),
         ]
-
-        created_categories = {}
-        for name, img_file in categories_to_seed:
-            upload_file = self.seeding_service.get_upload_file(img_file)
-            cat = await category_service.create_category(
-                user_id, profile_id, name, upload_file
-            )
-            created_categories[name] = cat
 
         # Structure: (Target Category, Word Text, Asset Filename)
         words_to_seed = [
             ("Algused", "Ma tahan", "I want.png"),
             ("Algused", "Jah", "yes.png"),
             ("Algused", "Ei", "no.png"),
+            ("Algused", "Aita mind", "help.png"),
+            ("Algused", "Oota", "wait.png"),
+            ("Numbrid", "üks", "one.png"),
+            ("Numbrid", "kaks", "2.png"),
+            ("Numbrid", "kolm", "3.png"),
+            ("Numbrid", "neli", "4.png"),
+            ("Numbrid", "viis", "5.png"),
+            ("Numbrid", "kuus", "6.png"),
+            ("Numbrid", "seitse", "7.png"),
+            ("Numbrid", "kaheksa", "8.png"),
+            ("Numbrid", "üheksa", "9.png"),
+            ("Numbrid", "kümme", "10.png"),
+            ("Värvid", "punane", "red.png"),
+            ("Värvid", "oranž", "orange.png"),
+            ("Värvid", "kollane", "yellow.png"),
+            ("Värvid", "roheline", "green.png"),
+            ("Värvid", "sinine", "blue.png"),
+            ("Värvid", "lilla", "purple.png"),
+            ("Värvid", "valge", "white.png"),
+            ("Värvid", "must", "black.png"),
+            ("Värvid", "pruun", "brown.png"),
+            ("Värvid", "roosa", "pink.png"),
+            ("Omadused", "suur", "big.png"),
+            ("Omadused", "keskmine", "medium.png"),
+            ("Omadused", "väike", "small.png"),
+            ("Omadused", "ümmargune", "circle.png"),
+            ("Omadused", "triibuline", "striped.png"),
+            ("Köök", "vesi", "water.png"),
+            ("Köök", "piim", "milk.png"),
+            ("Köök", "mahl", "juice.png"),
+            ("Köök", "klaas", "glass.png"),
+            ("Köök", "lusikas", "spoon.png"),
+            ("Köök", "kahvel", "fork.png"),
+            ("Köök", "nuga", "knife.png"),
+            ("Mänguasjad", "kaisukaru", "teddy-bear.png"),
+            ("Mänguasjad", "veoauto", "toy truck.png"),
+            ("Mänguasjad", "nukk", "Barbie.png"),
+            ("Mänguasjad", "ratas", "tricycle.png"),
+            ("Mänguasjad", "pusle", "puzzle.png"),
             ("Tegevused", "mängima", "play.png"),
             ("Tegevused", "sööma", "eat.png"),
+            ("Tegevused", "jooma", "drink.png"),
             ("Tegevused", "magama", "sleep.png"),
         ]
 
-        for cat_name, word_text, img_file in words_to_seed:
-            category = created_categories.get(cat_name)
-            if category and category.id:
-                upload_file = self.seeding_service.get_upload_file(img_file)
-                await image_word_service.save(
-                    user_id, category.id, word_text, upload_file
-                )
-                logger.info(f"Seeded word: {word_text} into category: {cat_name}")
-            else:
-                logger.warning(f"Skipping word {word_text}: Category {cat_name} not found or has no ID.")
+        all_items_to_upload = []
+        for name, img in categories_to_seed:
+            all_items_to_upload.append(("cat", name, self.seeding_service.get_upload_file(img)))
+        for cat_name, word_text, img in words_to_seed:
+            all_items_to_upload.append(("word", (cat_name, word_text), self.seeding_service.get_upload_file(img)))
 
-        return list(created_categories.values())
+        logger.info(f"Uploading {len(all_items_to_upload)} files in one session...")
+        uploaded_data = await self.image_storage_service.upload_batch(all_items_to_upload)
+
+        cat_dtos = []
+        word_map = {}
+        
+        for tag, meta, url in uploaded_data:
+            if tag == "cat":
+                cat_dtos.append(CategoryCreate(name=meta, image_url=url, profile_id=profile_id))
+            else:
+                c_name, w_text = meta
+                word_map.setdefault(c_name, []).append((w_text, url))
+
+        try:
+            # Batch 1: Categories
+            created_cats = await self.cat_repo.save_many(user_id, cat_dtos)
+            await self.cat_repo.session.flush() # Get the IDs without committing
+            
+            cat_id_lookup = {c.name: c.id for c in created_cats}
+            
+            # Batch 2: Words
+            final_word_dtos = []
+            for c_name, items in word_map.items():
+                cid = cat_id_lookup.get(c_name)
+                if cid is None:
+                    logger.error(f"Category {c_name} ID not found after save.")
+                    continue
+
+                for w_text, url in items:
+                    final_word_dtos.append(ImageWordCreate(category_id=cid, word=w_text, image_url=url))
+            
+            await self.i_w_repo.save_many(user_id, final_word_dtos)
+            
+            await self.cat_repo.session.commit()
+            return created_cats
+            
+        except Exception as e:
+            await self.cat_repo.session.rollback()
+            # Optional: trigger cleanup of uploaded_data urls
+            raise e
+
     
     async def _process_profile_urls(self, profile: Profile) -> Profile:
         """
