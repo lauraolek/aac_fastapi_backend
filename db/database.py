@@ -5,19 +5,13 @@ from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from .models import Base
-
-# Load environment variables from .env file if it exists (for local development)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from config import settings
 
 logger = logging.getLogger(__name__)
 
 # --- 1. Database Configuration ---
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/testdb")
+DATABASE_URL = settings.database_url
 
 async_engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionFactory = async_sessionmaker(

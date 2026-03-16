@@ -13,8 +13,9 @@ from db.database import create_all_tables
 
 # --- Configuration ---
 origins: List[str] = [
-    "*",
-    # "http://localhost:8080",
+    "https://aac.itcollege.ee",
+    "http://localhost:8080",
+    "http://localhost:61900",
 ]
 
 # --- Lifecycle Management ---

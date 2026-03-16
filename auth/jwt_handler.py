@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 import time
-import os
 from typing import Dict, Any, Optional
 from uuid import UUID as PyUUID
+from config import settings
 
 import jwt
 from jwt import PyJWTError
@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # NOTE: In a real application, SECRET_KEY should be loaded securely from an environment variable.
-JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-that-should-be-in-env-file")
+JWT_SECRET = settings.jwt_secret
 JWT_ALGORITHM = "HS256"
 
 # Define a type hint for the decoded token payload

@@ -1,19 +1,18 @@
 import logging
-import os
 import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Configuration - In a real app, use environment variables!
-SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")  # e.g., smtp.mailgun.org or smtp.sendgrid.net
-SMTP_PORT = os.environ.get("SMTP_PORT", 587)                 # Use 587 for STARTTLS
-SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "your-email@example.com")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "your-app-password")  # Never use your real password; use an App Password
-SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "your-email@example.com")
-APP_URL = os.environ.get("APP_URL", "yourapp.com")
+SMTP_SERVER = settings.smtp_server  # e.g., smtp.mailgun.org or smtp.sendgrid.net
+SMTP_PORT = settings.smtp_port                 # Use 587 for STARTTLS
+SMTP_USERNAME = settings.smtp_username
+SMTP_PASSWORD = settings.smtp_password  # Never use your real password; use an App Password
+SENDER_EMAIL = settings.sender_email
+APP_URL = settings.app_url
 
 class EmailService:
     def __init__(self):

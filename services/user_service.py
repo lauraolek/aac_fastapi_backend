@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta, timezone
 import logging
-import os
 import secrets
 from uuid import UUID as PyUUID
 from typing import Optional
@@ -13,11 +12,12 @@ from db.user_repository import UserRepository
 from models.schemas import ResetPasswordUpdate, UserCreate, UserLogin, UserOut, ProfileCreate
 from auth.password_handler import hash_password, verify_password
 from services.email_service import EmailService
+from config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 logger = logging.getLogger(__name__)
 
-DEFAULT_PIN = os.environ.get("DEFAULT_PIN", "9999")
+DEFAULT_PIN = settings.default_pin
 
 class UserService:
     def __init__(self, repository: UserRepository, prof_repo: ProfileRepository, email_service: EmailService, profile_service=None):

@@ -13,3 +13,4 @@ bcrypt
 sqlmodel
 aiofiles
 aiobotocore
+pydantic-settings

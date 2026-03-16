@@ -1,10 +1,11 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from config import settings
 
 from services.image_storage_service import ImageStorageService, get_storage_service
 
-UPLOAD_DIR = os.getenv("FILE_UPLOAD_DIR", "uploads")
+UPLOAD_DIR = settings.upload_dir
 
 router = APIRouter(prefix="", tags=["images"])
 

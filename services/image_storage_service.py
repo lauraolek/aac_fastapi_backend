@@ -10,14 +10,15 @@ from abc import ABC, abstractmethod
 from fastapi import UploadFile
 import aiobotocore
 import aiobotocore.session
+from config import settings
 
 # Configuration via environment variables
-STORAGE_TYPE = os.getenv("STORAGE_TYPE", "CLOUDFLARE")  # Options: LOCAL, CLOUDFLARE
-R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
-R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
-R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL") # e.g., https://pub-xyz.r2.dev
+STORAGE_TYPE = settings.storage_type  # Options: LOCAL, CLOUDFLARE
+R2_BUCKET_NAME = settings.r2_bucket_name
+R2_ACCOUNT_ID = settings.r2_account_id
+R2_ACCESS_KEY = settings.r2_access_key
+R2_SECRET_KEY = settings.r2_secret_key
+R2_PUBLIC_URL = settings.r2_public_url # e.g., https://pub-xyz.r2.dev
 
 logger = logging.getLogger(__name__)
 
