@@ -5,6 +5,7 @@ from uuid import UUID as PyUUID
 from typing import Optional
 from fastapi import BackgroundTasks, HTTPException, status
 from passlib.context import CryptContext
+from sqlalchemy import select
 
 from db.models import PasswordResetToken
 from db.profile_repository import ProfileRepository
@@ -186,13 +187,19 @@ class UserService:
         record = await self.repo.get_reset_token_record(data.token)
         
         if not record:
-            return False
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Token on vigane."
+            )
             
         # 2. Check expiration using timezone-aware UTC objects
         if datetime.now(timezone.utc) > record.expires_at:
             await self.repo.delete_reset_token(data.token)
             await self.repo.session.commit() # Commit deletion of expired token
-            return False
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Token on vigane."
+            )
 
         # 3. Hash and Update
         hashed_pw = hash_password(data.new_password)
@@ -209,3 +216,29 @@ class UserService:
             await self.repo.session.rollback()
             logger.error(f"Transaction failed, rolling back: {e}")
             return False
+        
+    async def validate_reset_token(self, token: str) -> bool:
+        """
+        Validates the existence and expiration of a password reset token.
+        """
+        # 1. Fetch token from database
+        stmt = select(PasswordResetToken).where(PasswordResetToken.token == token)
+        result = await self.repo.session.execute(stmt)
+        token_entry = result.scalar_one_or_none()
+
+        if not token_entry:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Antud link on vigane või juba kasutatud."
+            )
+
+        # 2. Check expiration
+        # Ensure your DB stores timezone-aware datetimes or compare consistently
+        now = datetime.now(timezone.utc)
+        if token_entry.expires_at.replace(tzinfo=timezone.utc) < now:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Parooli taastamise link on aegunud."
+            )
+
+        return True

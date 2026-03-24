@@ -116,3 +116,14 @@ async def reset_password(
             detail="Invalid or expired token."
         )
     return {"message": "Password updated successfully."}
+
+@router.get("/reset-password/validate")
+async def validate_reset_token(token: str,
+    user_service: UserService = Depends(get_user_service)):
+    """
+    Checks if a password reset token is valid and not expired.
+    Called by the Flutter app when the ResetPasswordScreen loads.
+    """
+    await user_service.validate_reset_token(token)
+
+    return {"status": "valid", "message": "Token is active"}
