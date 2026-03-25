@@ -13,7 +13,14 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = settings.database_url
 
-async_engine = create_async_engine(DATABASE_URL, echo=False)
+async_engine = create_async_engine(
+    DATABASE_URL,
+    pool_size=10,                # Maintain up to 10 keep-alive connections
+    max_overflow=20,             # Allow up to 20 extra connections during spikes
+    pool_recycle=3600,           # Refresh connections older than 1 hour
+    pool_pre_ping=True,          # Check if connection is alive before every request
+    echo=False                   # Set to True only for local debugging
+)
 AsyncSessionFactory = async_sessionmaker(
     bind=async_engine,
     class_=AsyncSession,
