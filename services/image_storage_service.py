@@ -58,14 +58,25 @@ class ImageStorageService(ABC):
         # Open the image using Pillow
         # (register_heif_opener allows Image.open to handle HEIC)
         img = Image.open(io.BytesIO(original_content))
+
+        # Fix EXIF orientation
+        try:
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass # If no EXIF data, just continue
         
         # Convert to RGB (Required for JPEG if source is RGBA or HEIC)
         if img.mode != "RGB":
             img = img.convert("RGB")
+
+        max_size = 1600 
+        if max(img.size) > max_size:
+            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
         
         # Compress and save as JPEG
         output = io.BytesIO()
-        img.save(output, format="JPEG", quality=85, optimize=True)
+        img.save(output, format="JPEG", quality=60, optimize=True)
         jpeg_bytes = output.getvalue()
         
         return jpeg_bytes, ".jpg"
