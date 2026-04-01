@@ -57,7 +57,7 @@ def teisenda_ma_tahan_lauseosa(sisend_loend: List[str]) -> List[str]:
             # Määra soovitud tunnused sõnaliigi järgi
             soovitud_tunnus = None
 
-            if sonaliik in ['S', 'A', 'N', 'Num']: # Nimisõna, Omadussõna, Arvsõna
+            if sonaliik in ['S', 'A', 'N', 'Num', "P"]: # Nimisõna, Omadussõna, Arvsõna, Asesõna
                 # Määrame ainsuse partitiivi (sg p)
                 soovitud_tunnus = "sg p" 
             elif sonaliik == 'V': # Tegusõna
@@ -72,7 +72,7 @@ def teisenda_ma_tahan_lauseosa(sisend_loend: List[str]) -> List[str]:
                     genereeritud_vormid = synthesize(lemma, soovitud_tunnus)
 
                     if genereeritud_vormid:
-                        valjund_loend.append(genereeritud_vormid[0])
+                        valjund_loend.append(genereeritud_vormid[-1])
                     else:
                         # Kui generatsioon ebaõnnestus, kasutame algvormi
                         valjund_loend.append(lemma)
