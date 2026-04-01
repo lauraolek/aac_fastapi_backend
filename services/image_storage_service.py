@@ -1,10 +1,12 @@
 import asyncio
+import io
 import logging
 import os
-import pathlib
 import time
 from typing import Any, Dict, List, Tuple
 import uuid
+from PIL import Image
+import pillow_heif
 import aiofiles
 from abc import ABC, abstractmethod
 from fastapi import UploadFile
@@ -21,6 +23,8 @@ R2_SECRET_KEY = settings.r2_secret_key
 R2_PUBLIC_URL = settings.r2_public_url # e.g., https://pub-xyz.r2.dev
 
 logger = logging.getLogger(__name__)
+
+pillow_heif.register_heif_opener()
 
 class ImageStorageService(ABC):
     @abstractmethod
@@ -44,6 +48,28 @@ class ImageStorageService(ABC):
     async def delete_batch(self, filenames: List[str]) -> Dict[str, bool]:
         pass
 
+    async def _process_image_to_jpeg(self, file: UploadFile) -> Tuple[bytes, str]:
+        """
+        Reads UploadFile, converts HEIC/PNG/etc to JPEG, and returns (bytes, new_extension)
+        """
+        await file.seek(0)
+        original_content = await file.read()
+        
+        # Open the image using Pillow
+        # (register_heif_opener allows Image.open to handle HEIC)
+        img = Image.open(io.BytesIO(original_content))
+        
+        # Convert to RGB (Required for JPEG if source is RGBA or HEIC)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        
+        # Compress and save as JPEG
+        output = io.BytesIO()
+        img.save(output, format="JPEG", quality=85, optimize=True)
+        jpeg_bytes = output.getvalue()
+        
+        return jpeg_bytes, ".jpg"
+
 class LocalStorageService(ImageStorageService):
     """Saves to a local directory - Best for development"""
     def __init__(self, upload_dir: str = "uploads"):
@@ -53,14 +79,10 @@ class LocalStorageService(ImageStorageService):
 
     async def upload_batch(self, files: List[Tuple[Any, Any, UploadFile]]) -> List[Tuple[Any, Any, str]]:
         """Batch upload for local storage."""
-        async def _upload_one(tag, meta, file: UploadFile):
-            source_name = file.filename or "unknown.bin"
-            extension = pathlib.Path(source_name).suffix.lower()
+        async def _upload_one(tag, meta, file: UploadFile):            
+            content, extension = await self._process_image_to_jpeg(file)
             unique_name = f"{uuid.uuid4()}{extension}"
             filepath = os.path.join(self.upload_dir, unique_name)
-            
-            await file.seek(0)
-            content = await file.read()
             async with aiofiles.open(filepath, 'wb') as out_file:
                 await out_file.write(content)
             return tag, meta, unique_name
@@ -73,12 +95,10 @@ class LocalStorageService(ImageStorageService):
         if not source_name:
             raise ValueError("Not a valid filename: No filename provided or found on object.")
 
-        extension = pathlib.Path(source_name).suffix.lower()
+        content, extension = await self._process_image_to_jpeg(file)
         filename = f"{uuid.uuid4()}{extension}"
         filepath = os.path.join(self.upload_dir, filename)
         async with aiofiles.open(filepath, 'wb') as out_file:
-            await file.seek(0)
-            content = await file.read()
             await out_file.write(content)
         return filename
     
@@ -147,18 +167,14 @@ class CloudflareR2Service(ImageStorageService):
             s3_client: Any = client
 
             async def _single_upload(type_tag, metadata, file: UploadFile):
-                await file.seek(0)
-                content = await file.read()
-                
-                source_name = file.filename or "unknown.bin"
-                extension = pathlib.Path(source_name).suffix.lower()
+                content, extension = await self._process_image_to_jpeg(file)
                 unique_name = f"{uuid.uuid4()}{extension}"
                 
                 await s3_client.put_object(
                     Bucket=R2_BUCKET_NAME,
                     Key=unique_name,
                     Body=content,
-                    ContentType=file.content_type
+                    ContentType="image/jpeg"
                 )
                 return type_tag, metadata, unique_name
 
@@ -182,10 +198,7 @@ class CloudflareR2Service(ImageStorageService):
             # incorrectly assuming methods like put_object are NoReturn.
             s3_client: Any = client
 
-            await file.seek(0)
-            content = await file.read()
-
-            extension = pathlib.Path(original_filename).suffix.lower()
+            content, extension = await self._process_image_to_jpeg(file)
             filename = f"{uuid.uuid4()}{extension}"
             
             # This will now pass type checking while remaining awaitable at runtime
@@ -193,7 +206,7 @@ class CloudflareR2Service(ImageStorageService):
                 Bucket=R2_BUCKET_NAME,
                 Key=filename,
                 Body=content,
-                ContentType=file.content_type
+                ContentType="image/jpeg"
             )
         return filename
     

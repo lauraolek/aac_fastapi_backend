@@ -15,3 +15,5 @@ sqlmodel
 aiofiles
 aiobotocore
 pydantic-settings
+pillow-heif
+Pillow
