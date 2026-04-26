@@ -32,13 +32,14 @@ async def get_image_word_by_id(
 async def create_image_word(
     category_id: int,
     word: str = Form(...),
+    word_osastav: Optional[str] = Form(None, alias="wordOsastav"),
     imageFile: UploadFile = File(...),
     user_id: PyUUID = Depends(get_current_user_id),
     svc: ImageWordService = Depends(get_image_word_service),
 ):
     """Creates a new image+word for a given category with a file upload."""
     try:
-        return await svc.save(user_id, category_id, word, imageFile)
+        return await svc.save(user_id, category_id, word, word_osastav, imageFile)
     except Exception:
         raise HTTPException(status_code=400, detail="Error creating image word")
 
@@ -46,6 +47,7 @@ async def create_image_word(
 async def update_image_word(
     id: int,
     wordText: str = Form(...),
+    word_osastav: Optional[str] =  Form(None, alias="wordOsastav"),
     imageFile: Optional[UploadFile] = File(None),
     category_id: int = Form(..., alias="categoryId"),
     user_id: PyUUID = Depends(get_current_user_id),
@@ -53,7 +55,7 @@ async def update_image_word(
 ):
     """Updates an existing image+word, optionally with a new image."""
     try:
-        return await svc.update(user_id, id, wordText, category_id, imageFile)
+        return await svc.update(user_id, id, wordText, word_osastav, category_id, imageFile)
     except ValueError:
         raise HTTPException(status_code=404, detail="ImageWord not found")
     except Exception:

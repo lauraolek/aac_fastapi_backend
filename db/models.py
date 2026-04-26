@@ -62,6 +62,7 @@ class ImageWordModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     category_id: Mapped[int] = mapped_column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
     word = Column(String, nullable=False)
+    word_osastav = Column(String, nullable=True)
     image_url = Column(Text, nullable=True)
     
     category = relationship("CategoryModel", back_populates="items")

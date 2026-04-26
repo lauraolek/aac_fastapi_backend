@@ -9,7 +9,7 @@ def teisenda_ma_tahan_lauseosa(sisend_loend: List[str]) -> List[str]:
     Kasutab uuemat EstNLTK kättesaamise süntaksit.
     """
     
-    # Määrame võimalikud käivitusfraasid (sulgudes on näited tulevikuks, et funktsioon oleks üldistatav)
+    # Määrame võimalikud käivitusfraasid
     TRIGGER_PHRASES = ["ma tahan"]
     
     # 1. Leiame esimese käivitusfraasi indeksi
@@ -88,3 +88,33 @@ def teisenda_ma_tahan_lauseosa(sisend_loend: List[str]) -> List[str]:
              valjund_loend.append(sona)
 
     return valjund_loend
+
+
+@staticmethod
+def get_suggestions(word: str):
+    if not word or word.isspace():
+        return []
+    
+    text = Text(word)
+    text.tag_layer(['morph_analysis'])
+    
+    suggestions = set()
+    for word_obj in text.words:
+        for annotation in word_obj.morph_analysis.annotations:
+            lemma = annotation.lemma
+            pos = annotation.partofspeech
+            
+            target_form = None
+            # Handling Nouns, Adjectives, Numerals, Pronouns
+            if pos in ['S', 'A', 'N', 'Num', 'P']:
+                target_form = 'sg p'  # Singular Partitive (osastav)
+            elif pos == 'V':
+                target_form = 'da'    # da-infinitive
+            
+            if target_form:
+                # Use synthesize to generate the word forms from the lemma
+                res = synthesize(lemma, target_form)
+                for form in res:
+                    suggestions.add(form)
+
+    return list(suggestions) if suggestions else [word]

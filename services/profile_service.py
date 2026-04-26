@@ -121,6 +121,7 @@ class ProfileService:
             except Exception as e:
                 # TODO In a pro system, you'd log this for a background cleanup task.
                 logger.warning(f"Orphaned image left: {e}")
+
     async def seed_categories_and_image_words(self, user_id: PyUUID, profile_id: int):
         """
         Internal helper to populate a new profile with defaults.
@@ -142,61 +143,61 @@ class ProfileService:
             ("Tegevused", "activity.png"),
         ]
 
-        # Structure: (Target Category, Word Text, Asset Filename)
+        # Structure: (Target Category, Word Text, Osastav text, Asset Filename)
         words_to_seed = [
-            ("Algused", "Ma tahan", "I want.png"),
-            ("Algused", "Jah", "yes.png"),
-            ("Algused", "Ei", "no.png"),
-            ("Algused", "Aita mind", "help.png"),
-            ("Algused", "Oota", "wait.png"),
-            ("Numbrid", "üks", "one.png"),
-            ("Numbrid", "kaks", "2.png"),
-            ("Numbrid", "kolm", "3.png"),
-            ("Numbrid", "neli", "4.png"),
-            ("Numbrid", "viis", "5.png"),
-            ("Numbrid", "kuus", "6.png"),
-            ("Numbrid", "seitse", "7.png"),
-            ("Numbrid", "kaheksa", "8.png"),
-            ("Numbrid", "üheksa", "9.png"),
-            ("Numbrid", "kümme", "10.png"),
-            ("Värvid", "punane", "red.png"),
-            ("Värvid", "oranž", "orange.png"),
-            ("Värvid", "kollane", "yellow.png"),
-            ("Värvid", "roheline", "green.png"),
-            ("Värvid", "sinine", "blue.png"),
-            ("Värvid", "lilla", "purple.png"),
-            ("Värvid", "valge", "white.png"),
-            ("Värvid", "must", "black.png"),
-            ("Värvid", "pruun", "brown.png"),
-            ("Värvid", "roosa", "pink.png"),
-            ("Omadused", "suur", "big.png"),
-            ("Omadused", "keskmine", "medium.png"),
-            ("Omadused", "väike", "small.png"),
-            ("Omadused", "ümmargune", "circle.png"),
-            ("Omadused", "triibuline", "striped.png"),
-            ("Köök", "vesi", "water.png"),
-            ("Köök", "piim", "milk.png"),
-            ("Köök", "mahl", "juice.png"),
-            ("Köök", "klaas", "glass.png"),
-            ("Köök", "lusikas", "spoon.png"),
-            ("Köök", "kahvel", "fork.png"),
-            ("Köök", "nuga", "knife.png"),
-            ("Mänguasjad", "kaisukaru", "teddy-bear.png"),
-            ("Mänguasjad", "veoauto", "toy truck.png"),
-            ("Mänguasjad", "nukk", "Barbie.png"),
-            ("Mänguasjad", "ratas", "tricycle.png"),
-            ("Mänguasjad", "pusle", "puzzle.png"),
-            ("Tegevused", "mängima", "play.png"),
-            ("Tegevused", "sööma", "eat.png"),
-            ("Tegevused", "jooma", "drink.png"),
-            ("Tegevused", "magama", "sleep.png"),
+            ("Algused", "Ma tahan", None, "I want.png"),
+            ("Algused", "Jah", None, "yes.png"),
+            ("Algused", "Ei", None, "no.png"),
+            ("Algused", "Aita mind", None, "help.png"),
+            ("Algused", "Oota", "Oodata", "wait.png"),
+            ("Numbrid", "üks", "ühte", "one.png"),
+            ("Numbrid", "kaks", "kahte", "2.png"),
+            ("Numbrid", "kolm", "kolme", "3.png"),
+            ("Numbrid", "neli", "nelja", "4.png"),
+            ("Numbrid", "viis", "viite", "5.png"),
+            ("Numbrid", "kuus", "kuute", "6.png"),
+            ("Numbrid", "seitse", "seitset", "7.png"),
+            ("Numbrid", "kaheksa", "kaheksat", "8.png"),
+            ("Numbrid", "üheksa", "üheksat", "9.png"),
+            ("Numbrid", "kümme", "kümmet", "10.png"),
+            ("Värvid", "punane", "punast", "red.png"),
+            ("Värvid", "oranž", "oranži", "orange.png"),
+            ("Värvid", "kollane", "kollast", "yellow.png"),
+            ("Värvid", "roheline", "rohelist", "green.png"),
+            ("Värvid", "sinine", "sinist", "blue.png"),
+            ("Värvid", "lilla", "lillat", "purple.png"),
+            ("Värvid", "valge", "valget", "white.png"),
+            ("Värvid", "must", "musta", "black.png"),
+            ("Värvid", "pruun", "pruuni", "brown.png"),
+            ("Värvid", "roosa", "roosat", "pink.png"),
+            ("Omadused", "suur", "suurt", "big.png"),
+            ("Omadused", "keskmine", "keskmist", "medium.png"),
+            ("Omadused", "väike", "väikest", "small.png"),
+            ("Omadused", "ümmargune", "ümmargust", "circle.png"),
+            ("Omadused", "triibuline", "triibulist", "striped.png"),
+            ("Köök", "vesi", "vett", "water.png"),
+            ("Köök", "piim", "piima", "milk.png"),
+            ("Köök", "mahl", "mahla", "juice.png"),
+            ("Köök", "klaas", "klaasi", "glass.png"),
+            ("Köök", "lusikas", "lusikat", "spoon.png"),
+            ("Köök", "kahvel", "kahvlit", "fork.png"),
+            ("Köök", "nuga", "nuga", "knife.png"),
+            ("Mänguasjad", "kaisukaru", "kaisukaru", "teddy-bear.png"),
+            ("Mänguasjad", "veoauto", "veoautot", "toy truck.png"),
+            ("Mänguasjad", "nukk", "nukku", "Barbie.png"),
+            ("Mänguasjad", "ratas", "ratast", "tricycle.png"),
+            ("Mänguasjad", "pusle", "puslet", "puzzle.png"),
+            ("Tegevused", "mängima", "mängida", "play.png"),
+            ("Tegevused", "sööma", "süüa", "eat.png"),
+            ("Tegevused", "jooma", "juua", "drink.png"),
+            ("Tegevused", "magama", "magada", "sleep.png"),
         ]
 
         all_items_to_upload = []
         for name, img in categories_to_seed:
             all_items_to_upload.append(("cat", name, self.seeding_service.get_upload_file(img)))
-        for cat_name, word_text, img in words_to_seed:
-            all_items_to_upload.append(("word", (cat_name, word_text), self.seeding_service.get_upload_file(img)))
+        for cat_name, word_text, osastav_text, img in words_to_seed:
+            all_items_to_upload.append(("word", (cat_name, word_text, osastav_text), self.seeding_service.get_upload_file(img)))
 
         logger.info(f"Uploading {len(all_items_to_upload)} files in one session...")
         uploaded_data = await self.image_storage_service.upload_batch(all_items_to_upload)
@@ -208,8 +209,8 @@ class ProfileService:
             if tag == "cat":
                 cat_dtos.append(CategoryCreate(name=meta, image_url=url, profile_id=profile_id))
             else:
-                c_name, w_text = meta
-                word_map.setdefault(c_name, []).append((w_text, url))
+                c_name, w_text, osastav_text = meta
+                word_map.setdefault(c_name, []).append((w_text, osastav_text, url))
 
         try:
             # Batch 1: Categories
@@ -226,8 +227,8 @@ class ProfileService:
                     logger.error(f"Category {c_name} ID not found after save.")
                     continue
 
-                for w_text, url in items:
-                    final_word_dtos.append(ImageWordCreate(category_id=cid, word=w_text, image_url=url))
+                for w_text, osastav_text, url in items:
+                    final_word_dtos.append(ImageWordCreate(category_id=cid, word=w_text, word_osastav=osastav_text, image_url=url))
             
             await self.i_w_repo.save_many(user_id, final_word_dtos)
             

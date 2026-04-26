@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from models.estnltk_schemas import SentenceRequest, SentenceResponse
 from models.schemas import ImageWord
-from services.estnltk_service import teisenda_ma_tahan_lauseosa
+from services.estnltk_service import teisenda_ma_tahan_lauseosa, get_suggestions
 from typing import List
 
 router = APIRouter()
@@ -49,3 +49,15 @@ def convert_sentence(request: SentenceRequest):
             status_code=500, 
             detail="An internal server error occurred during morphology processing."
         )
+    
+@router.get("/partitive", response_model=List[str])
+async def get_word_suggestions(
+    word: str = Query(..., min_length=1, description="The word in nominative/root form")
+):
+    try:
+        suggestions = get_suggestions(word)
+        return suggestions
+    except Exception as e:
+        # Log the error but return the original word so the UI doesn't break
+        print(f"EstNLTK Error: {e}")
+        return [word]

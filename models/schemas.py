@@ -23,6 +23,7 @@ class CamelModel(BaseModel):
 
 class ImageWordBase(CamelModel):
     word: str = Field(..., description="The base word (e.g., 'table', 'run').")
+    word_osastav: Optional[str] = None
     image_url: Optional[str] = Field(None, description="The URL for the image.")
 
 class ImageWordCreate(ImageWordBase):
@@ -31,6 +32,7 @@ class ImageWordCreate(ImageWordBase):
 class ImageWordUpdate(CamelModel):
     id: int
     word: Optional[str] = None
+    word_osastav: Optional[str] = None
     image_url: Optional[str] = None
 
 class ImageWord(ImageWordBase):

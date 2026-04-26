@@ -70,6 +70,7 @@ class ImageWordRepository(BaseRepository[ImageWordModel]):
                 ImageWordModel(
                     category_id=dto.category_id,
                     word=dto.word,
+                    word_osastav=dto.word_osastav,
                     image_url=dto.image_url
                 )
                 for dto in word_dtos
@@ -118,7 +119,7 @@ class ImageWordRepository(BaseRepository[ImageWordModel]):
                             .where(ProfileModel.user_id == user_id)
                         )
                     )
-                    .values(word=word_dto.word, image_url=word_dto.image_url)
+                    .values(word=word_dto.word, word_osastav=word_dto.word_osastav, image_url=word_dto.image_url)
                     .returning(ImageWordModel)
                 )
                 result = await self.session.execute(stmt)

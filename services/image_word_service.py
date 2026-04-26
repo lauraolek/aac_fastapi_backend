@@ -55,7 +55,7 @@ class ImageWordService:
     async def save_batch(
         self, 
         user_id: PyUUID, 
-        items: List[Tuple[int, str, UploadFile]]
+        items: List[Tuple[int, str, Optional[str], UploadFile]]
     ) -> List[ImageWord]:
         """
         Processes multiple images in parallel and commits them in a single DB transaction.
@@ -65,16 +65,17 @@ class ImageWordService:
         
         try:
             # 1. Parallel Uploads to Cloudflare
-            upload_tasks = [self.storage_service.upload(item[2]) for item in items]
+            upload_tasks = [self.storage_service.upload(item[3]) for item in items]
             uploaded_urls = await asyncio.gather(*upload_tasks)
 
             # 2. Prepare Database Objects
             word_data_list = []
-            for i, (category_id, word_text, _) in enumerate(items):
+            for i, (category_id, word_text, osastav_text, _) in enumerate(items):
                 word_data_list.append(
                     ImageWordCreate(
                         category_id=category_id,
                         word=word_text,
+                        word_osastav=osastav_text,
                         image_url=uploaded_urls[i]
                     )
                 )
@@ -108,16 +109,18 @@ class ImageWordService:
         user_id: PyUUID, 
         category_id: int, 
         word_text: str, 
+        osastav_text: Optional[str],
         image_file: UploadFile
     ) -> ImageWord:
-        results = await self.save_batch(user_id, [(category_id, word_text, image_file)])
+        results = await self.save_batch(user_id, [(category_id, word_text, osastav_text, image_file)])
         return results[0]
 
     async def update(
         self, 
         user_id: PyUUID, 
         image_word_id: int, 
-        word_text: str, 
+        word_text: str,
+        osastav_text: Optional[str],
         category_id: int, 
         image_file: Optional[UploadFile]
     ) -> ImageWord:
@@ -141,6 +144,7 @@ class ImageWordService:
             update_data = ImageWordCreate(            
                 category_id=category_id,
                 word=word_text,
+                word_osastav=osastav_text,
                 image_url=new_image_url if has_new_image else old_image_url
             )
 
