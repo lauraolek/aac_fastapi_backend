@@ -53,6 +53,7 @@ async def create_category(
     profile_id: int = Path(..., description="The ID of the profile"),
     name: str = Form(..., description="The name of the new category"),
     image_file: UploadFile = File(..., alias="imageFile", description="The image file for the category"),
+    rotation_turns: int = Form(0, alias="rotationTurns"),
     user_id: PyUUID = Depends(get_current_user_id),
     category_service = Depends(get_category_service)
 ):
@@ -62,14 +63,16 @@ async def create_category(
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail="Image file is required and cannot be empty."
         )
-
+    
+    await image_file.seek(0)
     # 3. Call the service to save the category and image
     try:
         return await category_service.create_category(
             user_id=user_id, 
             profile_id=profile_id, 
             name=name, 
-            image_file=image_file
+            image_file=image_file,
+            rotation_turns=rotation_turns
         )
     except HTTPException:
         # Re-raise exceptions raised by the service (like 404 for not found/unauthorized)
@@ -93,6 +96,7 @@ async def update_category(
     id: int = Path(..., description="The ID of the category to update"),
     name: str = Form(..., description="The new name of the category"),
     image_file: UploadFile | None = File(None, alias="imageFile", description="Optional new image file for the category"),
+    rotation_turns: Optional[int] = Form(None, alias="rotationTurns"),
     user_id: PyUUID = Depends(get_current_user_id),
     category_service = Depends(get_category_service)
 ):
@@ -100,23 +104,22 @@ async def update_category(
     Updates the category name and optionally replaces the image if a file is provided.
     Handles multipart/form-data.
     """
-    image_bytes: Optional[bytes] = None
-
     if image_file and image_file.filename:
         image_bytes = await image_file.read()
-        # Ensure that if a file object was sent, it actually contains content
         if not image_bytes:
              raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, 
                 detail="Provided image file is empty."
             )
+        await image_file.seek(0)
 
     try:
         updated_category = await category_service.update_category(
             user_id=user_id, 
             category_id=id, 
             name=name, 
-            image_file=image_file
+            image_file=image_file if (image_file and image_file.filename) else None,
+            rotation_turns=rotation_turns
         )
         return updated_category
     except HTTPException:

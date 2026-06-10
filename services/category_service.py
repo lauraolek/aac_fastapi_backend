@@ -46,7 +46,7 @@ class CategoryService:
         self, 
         user_id: PyUUID, 
         profile_id: int, 
-        items: List[Tuple[str, UploadFile]]
+        items: List[Tuple[str, UploadFile, int]]
     ) -> List[Category]:
         """
         Handles batch image upload and database persistence for multiple categories.
@@ -57,11 +57,11 @@ class CategoryService:
         try:
             # 1. Concurrent Image Uploads
             # We process uploads in parallel to speed up the batch process
-            async def upload_and_track(name: str, file: UploadFile):
-                url = await self.storage_service.upload(file)
+            async def upload_and_track(name: str, file: UploadFile, rotation: int):
+                url = await self.storage_service.upload(file, rotation_turns=rotation)
                 return name, url
 
-            upload_tasks = [upload_and_track(name, file) for name, file in items]
+            upload_tasks = [upload_and_track(name, file, rotation) for name, file, rotation in items]
             results = await asyncio.gather(*upload_tasks)
 
             # 2. Prepare Database Models
@@ -82,10 +82,10 @@ class CategoryService:
             return [Category.model_validate(rec) for rec in created_records]
 
         except Exception as e:
-            # 4. Cleanup: Delete any successfully uploaded images if the DB fails
-            cleanup_tasks = [self.storage_service.delete(url) for url in uploaded_urls]
+            # 4. Cleanup on failure
+            cleanup_tasks = [self.storage_service.delete(url) for url in uploaded_urls if url]
             if cleanup_tasks:
-                await asyncio.gather(*cleanup_tasks)
+                await asyncio.gather(*cleanup_tasks, return_exceptions=True)
             
             await self.repo.session.rollback()
             logger.error(f"Failed to create categories batch: {e}")
@@ -102,12 +102,13 @@ class CategoryService:
         user_id: PyUUID, 
         profile_id: int, 
         name: str, 
-        image_file: UploadFile
+        image_file: UploadFile,
+        rotation_turns: int
     ) -> Category:
         """
         Handles image upload and database persistence for a new category.
         """
-        results = await self.create_categories_batch(user_id, profile_id, [(name, image_file)])
+        results = await self.create_categories_batch(user_id, profile_id, [(name, image_file, rotation_turns)])
         return results[0]
 
     async def update_category(
@@ -115,7 +116,8 @@ class CategoryService:
         user_id: PyUUID, 
         category_id: int, 
         name: str, 
-        image_file: Optional[UploadFile] = None
+        image_file: Optional[UploadFile] = None,
+        rotation_turns: Optional[int] = None
     ) -> CategorySimple:
         """
         Updates metadata and replaces the image if a new one is provided.
@@ -124,15 +126,15 @@ class CategoryService:
         if not existing_category:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Category not found"
+                detail="Category not found"
             )
 
-        old_image_url = str(existing_category.image_url)
+        old_image_url = str(existing_category.image_url) if existing_category.image_url else None
         new_image_url = None
 
         try:
             if image_file:
-                new_image_url = await self.storage_service.upload(image_file)
+                new_image_url = await self.storage_service.upload(image_file, rotation_turns=rotation_turns or 0)
 
             update_data = {"name": name}
             if new_image_url:
@@ -143,7 +145,7 @@ class CategoryService:
 
 
             if new_image_url and old_image_url:
-                await self.storage_service.delete(str(old_image_url))
+                await self.storage_service.delete(old_image_url)
 
             return CategorySimple.model_validate(updated_category)
 
@@ -171,7 +173,7 @@ class CategoryService:
             )
         
         urls_to_delete = []
-        if str(category.image_url):
+        if category.image_url:
             urls_to_delete.append(str(category.image_url))
 
         for word in category.items:
@@ -181,20 +183,21 @@ class CategoryService:
         try:
             success = await self.repo.delete_category_by_id(user_id, category_id)
             if not success:
-                raise HTTPException(status_code=403, detail="Unauthorized delete")
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized delete")
                 
             await self.repo.session.commit()
         except Exception as e:
             await self.repo.session.rollback()
             logger.error(f"Delete failed: {e}")
+            if isinstance(e, HTTPException):
+                raise e
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete database record."
             )
 
-        # Trigger storage cleanup in background or after-the-fact
-        try:
-            await self.storage_service.delete_batch(urls_to_delete)
-        except Exception as e:
-            # TODO In a pro system, you'd log this for a background cleanup task.
-            logger.warning(f"Orphaned image left: {e}")
+        if urls_to_delete:
+            try:
+                await self.storage_service.delete_batch(urls_to_delete)
+            except Exception as e:
+                logger.warning(f"Orphaned image left during cascade cleanup: {e}")

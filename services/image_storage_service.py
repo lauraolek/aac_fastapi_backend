@@ -5,7 +5,7 @@ import os
 import time
 from typing import Any, Dict, List, Tuple
 import uuid
-from PIL import Image
+from PIL import Image, ImageOps
 import pillow_heif
 import aiofiles
 from abc import ABC, abstractmethod
@@ -28,7 +28,7 @@ pillow_heif.register_heif_opener()
 
 class ImageStorageService(ABC):
     @abstractmethod
-    async def upload(self, file: UploadFile, original_filename: str = "") -> str:
+    async def upload(self, file: UploadFile, rotation_turns: int = 0, original_filename: str = "") -> str:
         pass
 
     @abstractmethod
@@ -41,16 +41,17 @@ class ImageStorageService(ABC):
         pass
 
     @abstractmethod
-    async def upload_batch(self, items: List[Tuple[Any, Any, UploadFile]]) -> List[Tuple[Any, Any, str]]:
+    async def upload_batch(self, items: List[Tuple[Any, Any, UploadFile, int]]) -> List[Tuple[Any, Any, str]]:
         pass
 
     @abstractmethod
     async def delete_batch(self, filenames: List[str]) -> Dict[str, bool]:
         pass
 
-    async def _process_image_to_jpeg(self, file: UploadFile) -> Tuple[bytes, str]:
+    async def _process_image_to_jpeg(self, file: UploadFile, rotation_turns: int = 0) -> Tuple[bytes, str]:
         """
-        Reads UploadFile, converts HEIC/PNG/etc to JPEG, and returns (bytes, new_extension)
+        Reads UploadFile, converts to JPEG, bakes in rotation adjustments, 
+        cleans up conflict EXIF metadata tags, and returns (bytes, ".jpg")
         """
         await file.seek(0)
         original_content = await file.read()
@@ -74,19 +75,24 @@ class ImageStorageService(ABC):
         # Drop the Alpha channel now that we have a solid background
         img = img.convert("RGB")
 
-        # Fix EXIF orientation
+        # Strip layout conflicts out of original mobile camera orientation tags
         try:
-            from PIL import ImageOps
             img = ImageOps.exif_transpose(img)
         except Exception:
-            pass # If no EXIF data, just continue
+            pass 
+
+        # Bake custom user turn rotation into structural pixel canvas layers
+        if rotation_turns > 0:
+            # 1 turn = 90 clockwise (-90 in Pillow), 2 = 180, 3 = 270 (-270 in Pillow)
+            angle = rotation_turns * -90
+            img = img.rotate(angle, expand=True) # expand=True prevents corners from being cut off
 
         max_size = 1600 
         if max(img.size) > max_size:
             img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
         
-        # Compress and save as JPEG
         output = io.BytesIO()
+        # Saving without passing original 'exif' parameter cleans/overwrites EXIF completely
         img.save(output, format="JPEG", quality=60, optimize=True)
         jpeg_bytes = output.getvalue()
         
@@ -99,25 +105,31 @@ class LocalStorageService(ImageStorageService):
         if not os.path.exists(upload_dir):
             os.makedirs(upload_dir)
 
-    async def upload_batch(self, files: List[Tuple[Any, Any, UploadFile]]) -> List[Tuple[Any, Any, str]]:
-        """Batch upload for local storage."""
-        async def _upload_one(tag, meta, file: UploadFile):            
-            content, extension = await self._process_image_to_jpeg(file)
+    async def upload_batch(self, files: List[Tuple]) -> List[Tuple[Any, Any, str]]:
+        """Batch upload for local storage with safe element fallback unpacking."""
+        async def _upload_one(tag, meta, file: UploadFile, rotation_turns: int = 0):            
+            content, extension = await self._process_image_to_jpeg(file, rotation_turns)
             unique_name = f"{uuid.uuid4()}{extension}"
             filepath = os.path.join(self.upload_dir, unique_name)
             async with aiofiles.open(filepath, 'wb') as out_file:
                 await out_file.write(content)
             return tag, meta, unique_name
 
-        tasks = [_upload_one(t, m, f) for t, m, f in files]
+        tasks = []
+        for item in files:
+            # Fallback handling: checks if seed data sent 3 items or 4
+            t, m, f = item[0], item[1], item[2]
+            r = item[3] if len(item) > 3 else 0
+            tasks.append(_upload_one(t, m, f, r))
+
         return await asyncio.gather(*tasks)
 
-    async def upload(self, file: UploadFile, original_filename: str = "") -> str:
+    async def upload(self, file: UploadFile, rotation_turns: int = 0, original_filename: str = "") -> str:
         source_name = original_filename or file.filename
         if not source_name:
-            raise ValueError("Not a valid filename: No filename provided or found on object.")
+            raise ValueError("Not a valid filename.")
 
-        content, extension = await self._process_image_to_jpeg(file)
+        content, extension = await self._process_image_to_jpeg(file, rotation_turns)
         filename = f"{uuid.uuid4()}{extension}"
         filepath = os.path.join(self.upload_dir, filename)
         async with aiofiles.open(filepath, 'wb') as out_file:
@@ -155,7 +167,7 @@ class LocalStorageService(ImageStorageService):
                 return True
             return False
         except Exception as e:
-            print(f"Error deleting file {filepath}: {e}")
+            logger.error(f"Error deleting file {filepath}: {e}")
             return False
         
     async def get_url(self, filename: str, expires_in: int = 3600) -> str:
@@ -173,10 +185,10 @@ class CloudflareR2Service(ImageStorageService):
         self.session = aiobotocore.session.get_session()
         self._url_cache = {} # In-memory cache: { "path": (url, expiry_timestamp) }
 
-    async def upload_batch(self, items: List[Tuple[Any, Any, UploadFile]]) -> List[Tuple[Any, Any, str]]:
+    async def upload_batch(self, items: List[Tuple]) -> List[Tuple[Any, Any, str]]:
         """
         Uploads multiple files using a SINGLE client session to avoid handshake overhead.
-        'items' is a list of (type_tag, metadata, upload_file)
+        Safely falls back if seed data missing rotation index.
         """
         uploaded_results = []
         
@@ -188,8 +200,8 @@ class CloudflareR2Service(ImageStorageService):
         ) as client:
             s3_client: Any = client
 
-            async def _single_upload(type_tag, metadata, file: UploadFile):
-                content, extension = await self._process_image_to_jpeg(file)
+            async def _single_upload(type_tag, metadata, file: UploadFile, rotation_turns: int = 0):
+                content, extension = await self._process_image_to_jpeg(file, rotation_turns)
                 unique_name = f"{uuid.uuid4()}{extension}"
                 
                 await s3_client.put_object(
@@ -200,13 +212,18 @@ class CloudflareR2Service(ImageStorageService):
                 )
                 return type_tag, metadata, unique_name
 
-            # Execute all uploads within the SAME client context
-            tasks = [_single_upload(t, m, f) for t, m, f in items]
+            # Safe mapping array list comprehension to unpack either 3 or 4 item variations
+            tasks = []
+            for item in items:
+                t, m, f = item[0], item[1], item[2]
+                r = item[3] if len(item) > 3 else 0
+                tasks.append(_single_upload(t, m, f, r))
+
             uploaded_results = await asyncio.gather(*tasks)
             
         return uploaded_results
 
-    async def upload(self, file: UploadFile, original_filename: str = "") -> str:
+    async def upload(self, file: UploadFile, rotation_turns: int = 0, original_filename: str = "") -> str:
         """
         Uploads a file to Cloudflare R2.
         """
@@ -216,14 +233,11 @@ class CloudflareR2Service(ImageStorageService):
             aws_access_key_id=R2_ACCESS_KEY,
             aws_secret_access_key=R2_SECRET_KEY
         ) as client:
-            # Type hinting the client as Any prevents Pylance from 
-            # incorrectly assuming methods like put_object are NoReturn.
             s3_client: Any = client
 
-            content, extension = await self._process_image_to_jpeg(file)
+            content, extension = await self._process_image_to_jpeg(file, rotation_turns)
             filename = f"{uuid.uuid4()}{extension}"
             
-            # This will now pass type checking while remaining awaitable at runtime
             await s3_client.put_object(
                 Bucket=R2_BUCKET_NAME,
                 Key=filename,
@@ -277,7 +291,7 @@ class CloudflareR2Service(ImageStorageService):
                 )
                 return True
         except Exception as e:
-            print(f"Error deleting {safe_key} from R2: {e}")
+            logger.error(f"Error deleting {safe_key} from R2: {e}")
             return False
         
     async def get_url(self, filename: str, expires_in: int = 3600) -> str:

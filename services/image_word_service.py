@@ -55,22 +55,22 @@ class ImageWordService:
     async def save_batch(
         self, 
         user_id: PyUUID, 
-        items: List[Tuple[int, str, Optional[str], UploadFile]]
+        items: List[Tuple[int, str, Optional[str], UploadFile, int]]
     ) -> List[ImageWord]:
         """
         Processes multiple images in parallel and commits them in a single DB transaction.
-        'items' is a list of (category_id, word_text, image_file)
+        'items' is a list of (category_id, word_text, osastav_text, image_file, rotation_turns)
         """
         uploaded_urls = []
         
         try:
-            # 1. Parallel Uploads to Cloudflare
-            upload_tasks = [self.storage_service.upload(item[3]) for item in items]
+            # 1. Parallel Uploads to Cloudflare (image file remains index 3)
+            upload_tasks = [self.storage_service.upload(item[3], rotation_turns=item[4]) for item in items]
             uploaded_urls = await asyncio.gather(*upload_tasks)
 
             # 2. Prepare Database Objects
             word_data_list = []
-            for i, (category_id, word_text, osastav_text, _) in enumerate(items):
+            for i, (category_id, word_text, osastav_text, _, _) in enumerate(items):
                 word_data_list.append(
                     ImageWordCreate(
                         category_id=category_id,
@@ -110,9 +110,10 @@ class ImageWordService:
         category_id: int, 
         word_text: str, 
         osastav_text: Optional[str],
-        image_file: UploadFile
+        image_file: UploadFile,
+        rotation_turns: int
     ) -> ImageWord:
-        results = await self.save_batch(user_id, [(category_id, word_text, osastav_text, image_file)])
+        results = await self.save_batch(user_id, [(category_id, word_text, osastav_text, image_file, rotation_turns)])
         return results[0]
 
     async def update(
@@ -122,7 +123,8 @@ class ImageWordService:
         word_text: str,
         osastav_text: Optional[str],
         category_id: int, 
-        image_file: Optional[UploadFile]
+        image_file: Optional[UploadFile],
+        rotation_turns: Optional[int] = None
     ) -> ImageWord:
         """
         Updates an ImageWord, replacing the image in storage only after successful DB update.
@@ -138,8 +140,7 @@ class ImageWordService:
         try:
             # 2. Upload new asset if provided
             if has_new_image:
-                new_image_url = await self.storage_service.upload(image_file) # type: ignore
-
+                new_image_url = await self.storage_service.upload(image_file, rotation_turns=rotation_turns or 0) # type: ignore
             # 3. Save to DB
             update_data = ImageWordCreate(            
                 category_id=category_id,

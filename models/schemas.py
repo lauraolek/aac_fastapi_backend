@@ -28,6 +28,7 @@ class ImageWordBase(CamelModel):
 
 class ImageWordCreate(ImageWordBase):
     category_id: int = Field(..., description="Database ID of its category.")
+    rotation_turns: Optional[int] = 0
 
 class ImageWordUpdate(CamelModel):
     id: int
@@ -47,7 +48,7 @@ class CategoryBase(CamelModel):
     profile_id: Optional[int] = Field(None, description="Database ID of its profile.")
 
 class CategoryCreate(CategoryBase):
-    pass
+    rotation_turns: Optional[int] = 0
 
 class CategorySimple(CategoryBase):
     id: int
