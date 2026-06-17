@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import os
+from pathlib import Path
 import time
 from typing import Any, Dict, List, Tuple
 import uuid
@@ -12,6 +13,7 @@ from abc import ABC, abstractmethod
 from fastapi import UploadFile
 import aiobotocore
 import aiobotocore.session
+from urllib.parse import urlparse
 from config import settings
 
 # Configuration via environment variables
@@ -46,6 +48,10 @@ class ImageStorageService(ABC):
 
     @abstractmethod
     async def delete_batch(self, filenames: List[str]) -> Dict[str, bool]:
+        pass
+
+    @abstractmethod
+    async def download(self, image_url: str) -> bytes:
         pass
 
     async def _process_image_to_jpeg(self, file: UploadFile, rotation_turns: int = 0) -> Tuple[bytes, str]:
@@ -173,6 +179,36 @@ class LocalStorageService(ImageStorageService):
     async def get_url(self, filename: str, expires_in: int = 3600) -> str:
         # In local mode, we point back to our own API endpoint
         return f"/shared/{filename}"
+    
+    def _get_absolute_path_from_url(self, image_url: str) -> Path:
+        """
+        Helper to map a local server URL string to its corresponding system file path.
+        e.g., 'http://localhost:8000/static/uploads/apple.png' -> Path('static/uploads/apple.png')
+        """
+        parsed_url = urlparse(image_url)
+        relative_path_str = parsed_url.path
+        
+        if relative_path_str.startswith(settings.upload_dir):
+            relative_path_str = relative_path_str.replace(settings.upload_dir, "", 1)
+            
+        return Path(settings.upload_dir) / relative_path_str.lstrip("/")
+
+    async def download(self, image_url: str) -> bytes:
+        """
+        Reads a local file asynchronously from disk and returns its raw bytes.
+        """
+        file_path = self._get_absolute_path_from_url(image_url)
+        
+        if not file_path.exists() or not file_path.is_file():
+            logger.error(f"Local file target not found at: {file_path}")
+            raise FileNotFoundError(f"Requested image file does not exist on disk.")
+            
+        try:
+            async with aiofiles.open(file_path, mode="rb") as f:
+                return await f.read()
+        except Exception as e:
+            logger.error(f"Error reading local asset file {file_path}: {e}")
+            raise RuntimeError(f"Could not read local file asset.")
 
 class CloudflareR2Service(ImageStorageService):
     """
@@ -319,6 +355,40 @@ class CloudflareR2Service(ImageStorageService):
 
             self._url_cache[filename] = (url, time.time() + expires_in)
             return url
+        
+    def _extract_key_from_url(self, image_url: str) -> str:
+        """
+        Helper to parse out the object key name from a full public CDN/R2 URL.
+        e.g., 'https://pub-xyz.r2.dev/categories/apple.png' -> 'categories/apple.png'
+        """
+        parsed_url = urlparse(image_url)
+        # Remove leading slash to get a clean S3 Object Key
+        return parsed_url.path.lstrip("/")
+
+    async def download(self, image_url: str) -> bytes:
+        """
+        Downloads an object from Cloudflare R2 asynchronously and returns its raw bytes.
+        """
+        object_key = self._extract_key_from_url(image_url)
+        
+        async with self.session.create_client(
+            's3',
+            endpoint_url=self.endpoint_url,
+            aws_access_key_id=R2_ACCESS_KEY,
+            aws_secret_access_key=R2_SECRET_KEY,
+            region_name="auto" # R2 requires a region, 'auto' is standard for R2
+        ) as client:
+            s3_client: Any = client
+            try:
+                response = await s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=object_key)
+                
+                # S3 streaming body requires an async read
+                async with response["Body"] as stream:
+                    return await stream.read()
+                    
+            except Exception as e:
+                logger.error(f"Failed to download key '{object_key}' from R2 storage: {e}")
+                raise RuntimeError(f"Could not retrieve file from cloud storage.")
 
 
 def get_storage_service() -> ImageStorageService:

@@ -128,32 +128,48 @@ class ImageWordService:
     ) -> ImageWord:
         """
         Updates an ImageWord, replacing the image in storage only after successful DB update.
+        Handles image rotation both for newly uploaded files and existing files in storage.
         """
         # 1. Verify existence and ownership
         current_word = await self.find_by_id(user_id, image_word_id)
         old_image_url = current_word.image_url
-        new_image_url = None
+        new_image_url: Optional[str] = None
         
         # Checking for file content, not just presence of object
-        has_new_image = image_file is not None and image_file.filename != ""
+        has_new_image = image_file is not None and  image_file.filename != ""
+        should_rotate_existing = not has_new_image and rotation_turns and rotation_turns % 4 != 0
 
         try:
             # 2. Upload new asset if provided
             if has_new_image:
                 new_image_url = await self.storage_service.upload(image_file, rotation_turns=rotation_turns or 0) # type: ignore
+            
+            # Rotate existing storage image if rotation is changed without re-uploading a file
+            elif should_rotate_existing and old_image_url:
+                # Download existing bytes from your bucket provider (R2/S3)
+                existing_file_bytes = await self.storage_service.download(str(old_image_url))
+                
+                # Wrap bytes back into a standard UploadFile context structure for your pipeline
+                from io import BytesIO
+                rotated_upload_file = UploadFile(
+                    file=BytesIO(existing_file_bytes),
+                    filename=old_image_url.split("/")[-1]
+                )
+                new_image_url = await self.storage_service.upload(rotated_upload_file, rotation_turns=rotation_turns or 0)
+
             # 3. Save to DB
             update_data = ImageWordCreate(            
                 category_id=category_id,
                 word=word_text,
                 word_osastav=osastav_text,
-                image_url=new_image_url if has_new_image else old_image_url
+                image_url=new_image_url if new_image_url is not None else old_image_url
             )
 
             updated_data = await self.repo.save(user_id, update_data, image_word_id)
             await self.repo.session.commit()
             
             # 4. Cleanup old image only after successful commit
-            if has_new_image and old_image_url:
+            if new_image_url and old_image_url:
                 await self.storage_service.delete(str(old_image_url))
                 
             return ImageWord.model_validate(updated_data)

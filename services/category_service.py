@@ -121,6 +121,7 @@ class CategoryService:
     ) -> CategorySimple:
         """
         Updates metadata and replaces the image if a new one is provided.
+        Handles image rotation both for newly uploaded files and existing files in storage.
         """
         existing_category = await self.repo.find_category_by_id(user_id, category_id)
         if not existing_category:
@@ -130,26 +131,44 @@ class CategoryService:
             )
 
         old_image_url = str(existing_category.image_url) if existing_category.image_url else None
-        new_image_url = None
+        new_image_url: Optional[str] = None
+
+        should_rotate_existing = rotation_turns and rotation_turns % 4 != 0
 
         try:
+            # Case A: New file upload with potential rotation parameters
             if image_file:
                 new_image_url = await self.storage_service.upload(image_file, rotation_turns=rotation_turns or 0)
+            
+            # Case B: Rotate the asset currently stored in Cloudflare R2 / Local Disk
+            elif should_rotate_existing and old_image_url:
+                existing_file_bytes = await self.storage_service.download(old_image_url)
+                
+                from io import BytesIO
+                rotated_upload_file = UploadFile(
+                    file=BytesIO(existing_file_bytes),
+                    filename=old_image_url.split("/")[-1]
+                )
+                new_image_url = await self.storage_service.upload(rotated_upload_file, rotation_turns=rotation_turns or 0)
 
-            update_data = {"name": name}
-            if new_image_url:
+            # Build structural update payload
+            update_data: dict[str, str] = {"name": name}
+            
+            # If we generated a new asset URL (via upload or rotation processing)
+            if new_image_url is not None:
                 update_data["image_url"] = new_image_url
 
             updated_category = await self.repo.update_fields(user_id, category_id, update_data)
             await self.repo.session.commit()
 
-
+            # Clean cleanup logic: If a new URL was committed and an old one existed, purge the old file
             if new_image_url and old_image_url:
                 await self.storage_service.delete(old_image_url)
 
             return CategorySimple.model_validate(updated_category)
 
         except Exception as e:
+            # Prevent asset leaking from incomplete transaction processing scopes
             if new_image_url:
                 await self.storage_service.delete(new_image_url)
             
